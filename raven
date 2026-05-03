@@ -130,8 +130,6 @@ def cmd_run(args: argparse.Namespace) -> int:
                 if captured is not None:
                     print(captured)
                 first_failure_shown = True
-            else:
-                print(f"  [{i}] FAIL  (details suppressed)")
             continue
 
         if actual == expected:
@@ -145,8 +143,6 @@ def cmd_run(args: argparse.Namespace) -> int:
             if captured is not None:
                 print(captured)
             first_failure_shown = True
-        else:
-            print(f"  [{i}] FAIL  (details suppressed)")
 
     total = len(cases)
     print(f"\n{passed}/{total} passed")
