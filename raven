@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import importlib.util
+import io
 import json
 import sys
 import uuid
@@ -25,6 +27,7 @@ QUESTIONS_DIR = REPO_ROOT / "questions"
 TESTS_DIR = REPO_ROOT / "tests"
 
 DIFFICULTIES = ("easy", "medium", "hard")
+OUTPUT_LINE_CAP = 20
 
 
 def question_path(slug: str) -> Path:
@@ -63,6 +66,21 @@ def fmt(value) -> str:
         return "<unrepr-able>"
 
 
+def format_captured(buf: io.StringIO) -> str | None:
+    raw = buf.getvalue()
+    if not raw:
+        return None
+    if raw.endswith("\n"):
+        raw = raw[:-1]
+    lines = raw.split("\n")
+    overflow = len(lines) - OUTPUT_LINE_CAP
+    if overflow > 0:
+        lines = lines[:OUTPUT_LINE_CAP]
+        lines.append(f"... [truncated {overflow} more line(s)]")
+    indented = "\n".join(f"        {line}" for line in lines)
+    return f"        ----- captured output -----\n{indented}"
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     slug = args.slug
     data = load_test_file(slug)
@@ -77,24 +95,50 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     print(f"running {len(cases)} case(s) for {slug}")
     passed = 0
+    first_failure_shown = False
     for i, case in enumerate(cases, 1):
         case_args = case.get("args", [])
         expected = case.get("expected")
         label = case.get("name") or f"case {i}"
-        try:
-            actual = solve(*case_args)
-        except Exception as e:
-            print(f"  [{i}] FAIL  {label}  args={fmt(case_args)}  raised {type(e).__name__}: {e}")
+
+        buf = io.StringIO()
+        raised: Exception | None = None
+        actual = None
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            try:
+                actual = solve(*case_args)
+            except Exception as e:
+                raised = e
+
+        if raised is not None:
+            if not first_failure_shown:
+                print(
+                    f"  [{i}] FAIL  {label}  args={fmt(case_args)}  "
+                    f"raised {type(raised).__name__}: {raised}"
+                )
+                captured = format_captured(buf)
+                if captured is not None:
+                    print(captured)
+                first_failure_shown = True
+            else:
+                print(f"  [{i}] FAIL  {label}  (details suppressed)")
             continue
+
         if actual == expected:
             print(f"  [{i}] PASS  {label}  args={fmt(case_args)}")
             passed += 1
-        else:
+        elif not first_failure_shown:
             print(
                 f"  [{i}] FAIL  {label}  args={fmt(case_args)}\n"
                 f"        expected={fmt(expected)}\n"
                 f"        actual  ={fmt(actual)}"
             )
+            captured = format_captured(buf)
+            if captured is not None:
+                print(captured)
+            first_failure_shown = True
+        else:
+            print(f"  [{i}] FAIL  {label}  (details suppressed)")
 
     total = len(cases)
     print(f"\n{passed}/{total} passed")
