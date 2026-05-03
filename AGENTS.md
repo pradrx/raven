@@ -15,11 +15,15 @@ raven/
 ├── CLAUDE.md                   # thin pointer to this file for Claude Code
 ├── questions/<slug>.py         # vanilla problem statement + boilerplate solve
 ├── tests/<slug>.json           # hidden test cases + metadata
+├── specs/<slug>.md             # OPTIONAL user-authored spec consumed by /raven-new
 ├── templates/
 │   ├── question.py.tpl         # canonical shape for a question file
-│   └── tests.json.tpl          # canonical shape for a tests file
+│   ├── tests.json.tpl          # canonical shape for a tests file
+│   └── spec.md.tpl             # canonical shape for a spec file
 └── .claude/commands/*.md       # slash command definitions
 ```
+
+`specs/<slug>.md` is optional. It exists when the user invoked `/raven-spec <slug>` to scaffold a richer description before generating. Once `/raven-new` runs, the spec file becomes inert — raven leaves it alone for the user to commit, gitignore, or delete.
 
 The pair `(questions/<slug>.py, tests/<slug>.json)` MUST share the same `<slug>`. Both files exist or neither does.
 
@@ -114,7 +118,8 @@ All slash commands live in `.claude/commands/*.md`. Each command MUST follow the
 
 | Command | Args | Behavior |
 | --- | --- | --- |
-| `/raven-new` | `<slug> <description>` | Generate a new question + tests pair. Validates inline. Atomic rollback on failure. Aborts on slug collision. |
+| `/raven-spec` | `<slug>` | Scaffold `specs/<slug>.md` from `templates/spec.md.tpl` for the user to edit. Aborts on collision with an existing question or spec. Does NOT generate a question. |
+| `/raven-new` | `<slug> [<description>]` | Generate a new question + tests pair. If `specs/<slug>.md` exists, uses it (and warns if inline `<description>` was also given); otherwise uses inline `<description>`; aborts if neither is present. Validates inline; atomic rollback of the generated pair on failure (spec file is left alone). Aborts on slug collision. |
 | `/raven-revise` | `<slug> <change description>` | Modify an existing pair (docstring, tests, or both). Re-validates. Atomic rollback to previous contents on failure. |
 | `/raven-check` | `<slug>` | Re-validate an existing pair without changing it. Useful after manual edits. |
 | `/raven-hint` | `<slug>` | Read-only. Tiered hint (nudge → approach → partial code). MUST NOT read `tests/<slug>.json`. |
@@ -139,3 +144,4 @@ The `raven` script is a runner only. It does not author or validate.
 - Don't put third-party imports in question files.
 - Don't commit broken pairs. If you can't get validation to pass, delete the files and explain why to the user.
 - Don't reuse a slug. Slugs are unique forever within the repo.
+- Don't modify, archive, or delete `specs/<slug>.md`. That file belongs to the user — they wrote it, they own its lifecycle. `/raven-new`'s rollback only affects the generated `questions/` and `tests/` files.
