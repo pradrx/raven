@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+"""raven — local LeetCode-style harness.
+
+Subcommands:
+  run <slug>             Run user's `solve` against tests/<slug>.json cases.
+  list [--difficulty X]  List questions and their metadata.
+       [--topic Y]
+  show <slug>            Show the question docstring + meta. Hides cases.
+
+Pairs are matched by slug: questions/<slug>.py <-> tests/<slug>.json.
+"""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import importlib.util
+import json
+import sys
+import uuid
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent
+QUESTIONS_DIR = REPO_ROOT / "questions"
+TESTS_DIR = REPO_ROOT / "tests"
+
+DIFFICULTIES = ("easy", "medium", "hard")
+
+
+def question_path(slug: str) -> Path:
+    return QUESTIONS_DIR / f"{slug}.py"
+
+
+def test_path(slug: str) -> Path:
+    return TESTS_DIR / f"{slug}.json"
+
+
+def load_test_file(slug: str) -> dict:
+    p = test_path(slug)
+    if not p.is_file():
+        raise SystemExit(f"error: no test file at {p.relative_to(REPO_ROOT)}")
+    with p.open() as f:
+        return json.load(f)
+
+
+def load_question_module(slug: str):
+    p = question_path(slug)
+    if not p.is_file():
+        raise SystemExit(f"error: no question file at {p.relative_to(REPO_ROOT)}")
+    mod_name = f"raven_q_{uuid.uuid4().hex}"
+    spec = importlib.util.spec_from_file_location(mod_name, p)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"error: could not load question file: {p}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def fmt(value) -> str:
+    try:
+        return repr(value)
+    except Exception:
+        return "<unrepr-able>"
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    slug = args.slug
+    data = load_test_file(slug)
+    cases = data.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise SystemExit(f"error: tests/{slug}.json must have a non-empty 'cases' list")
+
+    module = load_question_module(slug)
+    solve = getattr(module, "solve", None)
+    if not callable(solve):
+        raise SystemExit(f"error: questions/{slug}.py must define a callable `solve`")
+
+    print(f"running {len(cases)} case(s) for {slug}")
+    passed = 0
+    for i, case in enumerate(cases, 1):
+        case_args = case.get("args", [])
+        expected = case.get("expected")
+        label = case.get("name") or f"case {i}"
+        try:
+            actual = solve(*case_args)
+        except Exception as e:
+            print(f"  [{i}] FAIL  {label}  args={fmt(case_args)}  raised {type(e).__name__}: {e}")
+            continue
+        if actual == expected:
+            print(f"  [{i}] PASS  {label}  args={fmt(case_args)}")
+            passed += 1
+        else:
+            print(
+                f"  [{i}] FAIL  {label}  args={fmt(case_args)}\n"
+                f"        expected={fmt(expected)}\n"
+                f"        actual  ={fmt(actual)}"
+            )
+
+    total = len(cases)
+    print(f"\n{passed}/{total} passed")
+    return 0 if passed == total else 1
+
+
+def collect_questions() -> list[tuple[str, dict | None]]:
+    rows: list[tuple[str, dict | None]] = []
+    if not TESTS_DIR.is_dir():
+        return rows
+    for p in sorted(TESTS_DIR.glob("*.json")):
+        slug = p.stem
+        try:
+            with p.open() as f:
+                data = json.load(f)
+        except Exception:
+            rows.append((slug, None))
+            continue
+        rows.append((slug, data.get("meta")))
+    return rows
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    rows = collect_questions()
+    if not rows:
+        print("(no questions yet)")
+        return 0
+
+    want_difficulty = args.difficulty
+    want_topic = args.topic
+
+    filtered: list[tuple[str, str, list[str], bool]] = []
+    for slug, meta in rows:
+        if meta is None:
+            difficulty, topics, missing = "?", [], True
+        else:
+            difficulty = meta.get("difficulty", "?")
+            topics = meta.get("topics") or []
+            missing = "difficulty" not in meta or "topics" not in meta
+        if want_difficulty and difficulty != want_difficulty:
+            continue
+        if want_topic and want_topic not in topics:
+            continue
+        filtered.append((slug, difficulty, topics, missing))
+
+    if not filtered:
+        print("(no questions match)")
+        return 0
+
+    slug_w = max(len("slug"), max(len(s) for s, *_ in filtered))
+    diff_w = max(len("difficulty"), max(len(d) for _, d, *_ in filtered))
+    print(f"{'slug':<{slug_w}}  {'difficulty':<{diff_w}}  topics")
+    print(f"{'-' * slug_w}  {'-' * diff_w}  {'-' * 20}")
+    for slug, difficulty, topics, missing in filtered:
+        topics_str = ", ".join(topics) if topics else "-"
+        flag = "  (meta missing)" if missing else ""
+        print(f"{slug:<{slug_w}}  {difficulty:<{diff_w}}  {topics_str}{flag}")
+    return 0
+
+
+def read_module_docstring(slug: str) -> str | None:
+    p = question_path(slug)
+    if not p.is_file():
+        raise SystemExit(f"error: no question file at {p.relative_to(REPO_ROOT)}")
+    with p.open() as f:
+        tree = ast.parse(f.read(), filename=str(p))
+    return ast.get_docstring(tree)
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    slug = args.slug
+    docstring = read_module_docstring(slug)
+    data = load_test_file(slug)
+    meta = data.get("meta") or {}
+
+    print(f"# {slug}")
+    print()
+    if meta:
+        difficulty = meta.get("difficulty", "?")
+        topics = ", ".join(meta.get("topics") or []) or "-"
+        print(f"difficulty: {difficulty}")
+        print(f"topics:     {topics}")
+        print()
+    else:
+        print("(no meta)")
+        print()
+
+    if docstring:
+        print(docstring.strip())
+    else:
+        print("(no docstring)")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="raven", description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_run = sub.add_parser("run", help="run a question against its tests")
+    p_run.add_argument("slug")
+    p_run.set_defaults(func=cmd_run)
+
+    p_list = sub.add_parser("list", help="list questions")
+    p_list.add_argument("--difficulty", choices=DIFFICULTIES)
+    p_list.add_argument("--topic")
+    p_list.set_defaults(func=cmd_list)
+
+    p_show = sub.add_parser("show", help="show a question's docstring + meta (no cases)")
+    p_show.add_argument("slug")
+    p_show.set_defaults(func=cmd_show)
+
+    return parser
+
+
+def main(argv: list[str]) -> int:
+    args = build_parser().parse_args(argv[1:])
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
