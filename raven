@@ -18,6 +18,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import pprint
 import sys
 import uuid
 from pathlib import Path
@@ -66,6 +67,18 @@ def fmt(value) -> str:
         return "<unrepr-able>"
 
 
+def pfmt_field(prefix: str, value) -> str:
+    try:
+        text = pprint.pformat(value, width=80, compact=True)
+    except Exception:
+        text = "<unrepr-able>"
+    if "\n" not in text:
+        return prefix + text
+    pad = " " * len(prefix)
+    first, *rest = text.split("\n")
+    return prefix + first + "\n" + "\n".join(pad + line for line in rest)
+
+
 def format_captured(buf: io.StringIO) -> str | None:
     raw = buf.getvalue()
     if not raw:
@@ -111,10 +124,8 @@ def cmd_run(args: argparse.Namespace) -> int:
 
         if raised is not None:
             if not first_failure_shown:
-                print(
-                    f"  [{i}] FAIL  args={fmt(case_args)}  "
-                    f"raised {type(raised).__name__}: {raised}"
-                )
+                print(pfmt_field(f"  [{i}] FAIL  args=", case_args))
+                print(f"        raised {type(raised).__name__}: {raised}")
                 captured = format_captured(buf)
                 if captured is not None:
                     print(captured)
@@ -127,11 +138,9 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"  [{i}] PASS  args={fmt(case_args)}")
             passed += 1
         elif not first_failure_shown:
-            print(
-                f"  [{i}] FAIL  args={fmt(case_args)}\n"
-                f"        expected={fmt(expected)}\n"
-                f"        actual  ={fmt(actual)}"
-            )
+            print(pfmt_field(f"  [{i}] FAIL  args=", case_args))
+            print(pfmt_field("        expected=", expected))
+            print(pfmt_field("        actual  =", actual))
             captured = format_captured(buf)
             if captured is not None:
                 print(captured)
