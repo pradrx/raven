@@ -18,7 +18,9 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import pprint
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -29,6 +31,23 @@ TESTS_DIR = REPO_ROOT / "tests"
 
 DIFFICULTIES = ("easy", "medium", "hard")
 OUTPUT_LINE_CAP = 20
+
+_USE_COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def color(text: str, code: str) -> str:
+    if not _USE_COLOR:
+        return text
+    return f"\x1b[{code}m{text}\x1b[0m"
+
+
+def visible_len(s: str) -> int:
+    return len(_ANSI_RE.sub("", s))
+
+
+GREEN = "32"
+RED = "31"
 
 
 def question_path(slug: str) -> Path:
@@ -74,7 +93,7 @@ def pfmt_field(prefix: str, value) -> str:
         text = "<unrepr-able>"
     if "\n" not in text:
         return prefix + text
-    pad = " " * len(prefix)
+    pad = " " * visible_len(prefix)
     first, *rest = text.split("\n")
     return prefix + first + "\n" + "\n".join(pad + line for line in rest)
 
@@ -124,7 +143,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
         if raised is not None:
             if not first_failure_shown:
-                print(pfmt_field(f"  [{i}] FAIL  args=", case_args))
+                print(pfmt_field(f"  [{i}] {color('FAIL', RED)}  args=", case_args))
                 print(f"        raised {type(raised).__name__}: {raised}")
                 captured = format_captured(buf)
                 if captured is not None:
@@ -133,10 +152,10 @@ def cmd_run(args: argparse.Namespace) -> int:
             continue
 
         if actual == expected:
-            print(f"  [{i}] PASS  args={fmt(case_args)}")
+            print(f"  [{i}] {color('PASS', GREEN)}  args={fmt(case_args)}")
             passed += 1
         elif not first_failure_shown:
-            print(pfmt_field(f"  [{i}] FAIL  args=", case_args))
+            print(pfmt_field(f"  [{i}] {color('FAIL', RED)}  args=", case_args))
             print(pfmt_field("        expected=", expected))
             print(pfmt_field("        actual  =", actual))
             captured = format_captured(buf)
@@ -145,7 +164,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             first_failure_shown = True
 
     total = len(cases)
-    print(f"\n{passed}/{total} passed")
+    summary = f"{passed}/{total} passed"
+    print("\n" + color(summary, GREEN if passed == total else RED))
     return 0 if passed == total else 1
 
 
