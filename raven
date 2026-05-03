@@ -99,7 +99,6 @@ def cmd_run(args: argparse.Namespace) -> int:
     for i, case in enumerate(cases, 1):
         case_args = case.get("args", [])
         expected = case.get("expected")
-        label = case.get("name") or f"case {i}"
 
         buf = io.StringIO()
         raised: Exception | None = None
@@ -113,7 +112,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         if raised is not None:
             if not first_failure_shown:
                 print(
-                    f"  [{i}] FAIL  {label}  args={fmt(case_args)}  "
+                    f"  [{i}] FAIL  args={fmt(case_args)}  "
                     f"raised {type(raised).__name__}: {raised}"
                 )
                 captured = format_captured(buf)
@@ -121,15 +120,15 @@ def cmd_run(args: argparse.Namespace) -> int:
                     print(captured)
                 first_failure_shown = True
             else:
-                print(f"  [{i}] FAIL  {label}  (details suppressed)")
+                print(f"  [{i}] FAIL  (details suppressed)")
             continue
 
         if actual == expected:
-            print(f"  [{i}] PASS  {label}  args={fmt(case_args)}")
+            print(f"  [{i}] PASS  args={fmt(case_args)}")
             passed += 1
         elif not first_failure_shown:
             print(
-                f"  [{i}] FAIL  {label}  args={fmt(case_args)}\n"
+                f"  [{i}] FAIL  args={fmt(case_args)}\n"
                 f"        expected={fmt(expected)}\n"
                 f"        actual  ={fmt(actual)}"
             )
@@ -138,7 +137,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 print(captured)
             first_failure_shown = True
         else:
-            print(f"  [{i}] FAIL  {label}  (details suppressed)")
+            print(f"  [{i}] FAIL  (details suppressed)")
 
     total = len(cases)
     print(f"\n{passed}/{total} passed")
