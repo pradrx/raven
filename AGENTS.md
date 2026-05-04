@@ -39,7 +39,7 @@ The triple `(questions/<rel>.py, tests/<rel>.json, specs/<rel>.md)` MUST share t
 
 - Lowercase. ASCII letters, digits, underscores, and hyphens only — pattern `[a-z][a-z0-9_-]*`.
 - Must start with a letter.
-- Short and descriptive (`two_sum`, `edit_distance_variants`, `valid_parens`, `contains-duplicate`).
+- Short and descriptive (`two_sum`, `edit_distance_variants`, `contains-duplicate`).
 - **Globally unique across the entire `questions/` tree.** Folder context does not disambiguate — `leetcode/two_sum` and `interview/two_sum` cannot coexist.
 - Slugs are unique forever within the repo. Don't release a slug name back into the namespace by deleting and re-creating.
 
@@ -74,7 +74,7 @@ Forbidden:
 - A real implementation in `solve` — its body is always `pass`.
 - Third-party imports.
 
-See `questions/two_sum.py` for the canonical example. The minimal shape lives at `templates/question.py.template`.
+See `questions/example/two_sum.py` for the canonical example. The minimal shape lives at `templates/question.py.template`.
 
 ## Test file schema (`tests/<rel>.json`)
 

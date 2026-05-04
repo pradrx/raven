@@ -35,7 +35,7 @@ Otherwise prefix with `./` when run from the repo root.
 
 ```bash
 ./raven run two_sum
-./raven run leetcode/easy/two_sum   # path-style also works
+./raven run example/two_sum   # path-style also works
 # → per-case PASS/FAIL with case names, summary, exit 0 on all-pass.
 ```
 

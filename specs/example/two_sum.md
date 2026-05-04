@@ -1,5 +1,5 @@
 <!--
-specs/two_sum.md
+specs/example/two_sum.md
 
 Edit the sections below, then run `/raven-new <slug>` to generate the
 question + tests pair from this spec. Raven leaves this file alone
