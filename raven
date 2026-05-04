@@ -22,6 +22,7 @@ import os
 import pprint
 import re
 import sys
+import traceback
 import uuid
 from pathlib import Path
 
@@ -98,6 +99,14 @@ def pfmt_field(prefix: str, value) -> str:
     return prefix + first + "\n" + "\n".join(pad + line for line in rest)
 
 
+def format_traceback(exc: BaseException) -> str:
+    tb = exc.__traceback__
+    if tb is not None and tb.tb_next is not None:
+        tb = tb.tb_next
+    text = "".join(traceback.format_exception(type(exc), exc, tb)).rstrip("\n")
+    return "\n".join(f"        {line}" for line in text.split("\n"))
+
+
 def format_captured(buf: io.StringIO) -> str | None:
     raw = buf.getvalue()
     if not raw:
@@ -126,8 +135,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         raise SystemExit(f"error: questions/{slug}.py must define a callable `solve`")
 
     print(f"running {len(cases)} case(s) for {slug}")
+    total = len(cases)
     passed = 0
-    first_failure_shown = False
+    first_failure: tuple[int, list, object, object, Exception | None, str | None] | None = None
     for i, case in enumerate(cases, 1):
         case_args = case.get("args", [])
         expected = case.get("expected")
@@ -141,29 +151,27 @@ def cmd_run(args: argparse.Namespace) -> int:
             except Exception as e:
                 raised = e
 
-        if raised is not None:
-            if not first_failure_shown:
-                print(pfmt_field(f"  [{i}] {color('FAIL', RED)}  args=", case_args))
-                print(f"        raised {type(raised).__name__}: {raised}")
-                captured = format_captured(buf)
-                if captured is not None:
-                    print(captured)
-                first_failure_shown = True
+        if raised is None and actual == expected:
+            passed += 1
             continue
 
-        if actual == expected:
-            print(f"  [{i}] {color('PASS', GREEN)}  args={fmt(case_args)}")
-            passed += 1
-        elif not first_failure_shown:
-            print(pfmt_field(f"  [{i}] {color('FAIL', RED)}  args=", case_args))
+        if first_failure is None:
+            first_failure = (i, case_args, expected, actual, raised, format_captured(buf))
+
+    if first_failure is None:
+        for i, case in enumerate(cases, 1):
+            print(f"  [{i}] {color('PASS', GREEN)}  args={fmt(case.get('args', []))}")
+    else:
+        i, case_args, expected, actual, raised, captured = first_failure
+        print(pfmt_field(f"  [{i}] {color('FAIL', RED)}  args=", case_args))
+        if raised is not None:
+            print(format_traceback(raised))
+        else:
             print(pfmt_field("        expected=", expected))
             print(pfmt_field("        actual  =", actual))
-            captured = format_captured(buf)
-            if captured is not None:
-                print(captured)
-            first_failure_shown = True
+        if captured is not None:
+            print(captured)
 
-    total = len(cases)
     summary = f"{passed}/{total} passed"
     print("\n" + color(summary, GREEN if passed == total else RED))
     return 0 if passed == total else 1
