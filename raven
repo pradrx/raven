@@ -2,12 +2,14 @@
 """raven — local LeetCode-style harness.
 
 Subcommands:
-  run <slug>             Run user's `solve` against tests/<slug>.json cases.
+  run <slug-or-path>     Run user's `solve` against the matching test file.
   list [--difficulty X]  List questions and their metadata.
        [--topic Y]
-  show <slug>            Show the question docstring + meta. Hides cases.
+  show <slug-or-path>    Show the question docstring + meta. Hides cases.
 
-Pairs are matched by slug: questions/<slug>.py <-> tests/<slug>.json.
+Triples are matched by relative path:
+    questions/<rel>.py <-> tests/<rel>.json <-> specs/<rel>.md
+Slugs (the file stem) are globally unique across the entire questions/ tree.
 """
 
 from __future__ import annotations
@@ -29,6 +31,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent
 QUESTIONS_DIR = REPO_ROOT / "questions"
 TESTS_DIR = REPO_ROOT / "tests"
+SPECS_DIR = REPO_ROOT / "specs"
+
+SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 DIFFICULTIES = ("easy", "medium", "hard")
 OUTPUT_LINE_CAP = 20
@@ -51,30 +56,95 @@ GREEN = "32"
 RED = "31"
 
 
-def question_path(slug: str) -> Path:
-    return QUESTIONS_DIR / f"{slug}.py"
+def validate_token(token: str, kind: str) -> None:
+    if not SLUG_RE.match(token):
+        raise SystemExit(
+            f"error: invalid {kind} '{token}'. "
+            f"Must match [a-z][a-z0-9_-]* (lowercase letter, then letters/digits/_/-)."
+        )
 
 
-def test_path(slug: str) -> Path:
-    return TESTS_DIR / f"{slug}.json"
+def parse_path_style(arg: str) -> tuple[tuple[str, ...], str]:
+    if arg.startswith("/"):
+        arg = arg[1:]
+    if not arg:
+        raise SystemExit("error: empty slug")
+    if arg.endswith("/"):
+        raise SystemExit(f"error: trailing '/' in argument; expected <folder>/<slug>")
+    parts = arg.split("/")
+    kind = "path segment" if len(parts) > 1 else "slug"
+    for part in parts:
+        validate_token(part, kind)
+    return tuple(parts[:-1]), parts[-1]
 
 
-def load_test_file(slug: str) -> dict:
-    p = test_path(slug)
-    if not p.is_file():
-        raise SystemExit(f"error: no test file at {p.relative_to(REPO_ROOT)}")
-    with p.open() as f:
+def build_slug_index() -> dict[str, Path]:
+    index: dict[str, Path] = {}
+    if not QUESTIONS_DIR.is_dir():
+        return index
+    for path in sorted(QUESTIONS_DIR.rglob("*.py")):
+        rel = path.relative_to(QUESTIONS_DIR)
+        if any(part.startswith((".", "_")) for part in rel.parts):
+            continue
+        for segment in rel.parts[:-1]:
+            validate_token(segment, "folder segment")
+        slug = path.stem
+        validate_token(slug, "slug")
+        if slug in index:
+            raise SystemExit(
+                f"error: duplicate slug '{slug}' found at:\n"
+                f"    {index[slug].relative_to(REPO_ROOT)}\n"
+                f"    {path.relative_to(REPO_ROOT)}\n"
+                f"Slugs must be globally unique. Rename one of these files "
+                f"(and its matching test/spec) before running raven again."
+            )
+        index[slug] = path
+    return index
+
+
+def resolve_slug(arg: str) -> tuple[str, Path]:
+    folder, slug = parse_path_style(arg)
+    index = build_slug_index()
+    if slug not in index:
+        raise SystemExit(
+            f"error: no question with slug '{slug}'. "
+            f"Run ./raven list to see available slugs."
+        )
+    qpath = index[slug]
+    actual_folder = qpath.relative_to(QUESTIONS_DIR).parts[:-1]
+    if folder and folder != actual_folder:
+        actual_rel = qpath.relative_to(QUESTIONS_DIR)
+        requested_rel = "/".join((*folder, f"{slug}.py"))
+        raise SystemExit(
+            f"error: slug '{slug}' lives at questions/{actual_rel}, "
+            f"not questions/{requested_rel}"
+        )
+    return slug, qpath
+
+
+def paths_for(question_path: Path) -> tuple[Path, Path, Path]:
+    base = question_path.relative_to(QUESTIONS_DIR).with_suffix("")
+    return (
+        question_path,
+        (TESTS_DIR / base).with_suffix(".json"),
+        (SPECS_DIR / base).with_suffix(".md"),
+    )
+
+
+def load_test_file(test_path: Path) -> dict:
+    if not test_path.is_file():
+        raise SystemExit(f"error: no test file at {test_path.relative_to(REPO_ROOT)}")
+    with test_path.open() as f:
         return json.load(f)
 
 
-def load_question_module(slug: str):
-    p = question_path(slug)
-    if not p.is_file():
-        raise SystemExit(f"error: no question file at {p.relative_to(REPO_ROOT)}")
+def load_question_module(question_path: Path):
+    if not question_path.is_file():
+        raise SystemExit(f"error: no question file at {question_path.relative_to(REPO_ROOT)}")
     mod_name = f"raven_q_{uuid.uuid4().hex}"
-    spec = importlib.util.spec_from_file_location(mod_name, p)
+    spec = importlib.util.spec_from_file_location(mod_name, question_path)
     if spec is None or spec.loader is None:
-        raise SystemExit(f"error: could not load question file: {p}")
+        raise SystemExit(f"error: could not load question file: {question_path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -123,16 +193,21 @@ def format_captured(buf: io.StringIO) -> str | None:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    slug = args.slug
-    data = load_test_file(slug)
+    slug, qpath = resolve_slug(args.slug)
+    _, tpath, _ = paths_for(qpath)
+    data = load_test_file(tpath)
     cases = data.get("cases")
     if not isinstance(cases, list) or not cases:
-        raise SystemExit(f"error: tests/{slug}.json must have a non-empty 'cases' list")
+        raise SystemExit(
+            f"error: {tpath.relative_to(REPO_ROOT)} must have a non-empty 'cases' list"
+        )
 
-    module = load_question_module(slug)
+    module = load_question_module(qpath)
     solve = getattr(module, "solve", None)
     if not callable(solve):
-        raise SystemExit(f"error: questions/{slug}.py must define a callable `solve`")
+        raise SystemExit(
+            f"error: {qpath.relative_to(REPO_ROOT)} must define a callable `solve`"
+        )
 
     print(f"running {len(cases)} case(s) for {slug}")
     total = len(cases)
@@ -231,19 +306,19 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def read_module_docstring(slug: str) -> str | None:
-    p = question_path(slug)
-    if not p.is_file():
-        raise SystemExit(f"error: no question file at {p.relative_to(REPO_ROOT)}")
-    with p.open() as f:
-        tree = ast.parse(f.read(), filename=str(p))
+def read_module_docstring(question_path: Path) -> str | None:
+    if not question_path.is_file():
+        raise SystemExit(f"error: no question file at {question_path.relative_to(REPO_ROOT)}")
+    with question_path.open() as f:
+        tree = ast.parse(f.read(), filename=str(question_path))
     return ast.get_docstring(tree)
 
 
 def cmd_show(args: argparse.Namespace) -> int:
-    slug = args.slug
-    docstring = read_module_docstring(slug)
-    data = load_test_file(slug)
+    slug, qpath = resolve_slug(args.slug)
+    _, tpath, _ = paths_for(qpath)
+    docstring = read_module_docstring(qpath)
+    data = load_test_file(tpath)
     meta = data.get("meta") or {}
 
     print(f"# {slug}")
@@ -270,7 +345,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_run = sub.add_parser("run", help="run a question against its tests")
-    p_run.add_argument("slug")
+    p_run.add_argument("slug", help="slug or folder/path/slug")
     p_run.set_defaults(func=cmd_run)
 
     p_list = sub.add_parser("list", help="list questions")
@@ -279,7 +354,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_list.set_defaults(func=cmd_list)
 
     p_show = sub.add_parser("show", help="show a question's docstring + meta (no cases)")
-    p_show.add_argument("slug")
+    p_show.add_argument("slug", help="slug or folder/path/slug")
     p_show.set_defaults(func=cmd_show)
 
     return parser
