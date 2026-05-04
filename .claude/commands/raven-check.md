@@ -8,19 +8,23 @@ You are re-validating an existing pair. Useful after a hand edit, or when revisi
 
 The user invoked: `/raven-check $ARGUMENTS`
 
-Parse as `<slug>` (single token). Strip surrounding whitespace.
+Parse as a single locator token — either a bare slug or path-style (`<folder>/<...>/<slug>`). Strip surrounding whitespace.
+
+**Resolve `<locator>` to `<rel>`**:
+- Path-style: `<rel>` is the locator itself (after stripping any leading `/`).
+- Bare slug: recursively walk `questions/` for `<slug>.py`; `<rel>` is the unique match's path-without-extension relative to `questions/`. Abort if zero matches or duplicates.
 
 ## Steps
 
-1. **Confirm the pair exists.** If either file is missing, abort with a clear message.
+1. **Confirm the pair exists.** If either `questions/<rel>.py` or `tests/<rel>.json` is missing, abort with a clear message.
 
-2. **Schema check on `tests/<slug>.json`** per `AGENTS.md`:
+2. **Schema check on `tests/<rel>.json`** per `AGENTS.md`:
    - JSON parses.
    - `meta.difficulty` is `easy` | `medium` | `hard`.
    - `meta.topics` is a non-empty list of strings.
    - `cases` is a non-empty list; each case has `args` (list) and `expected`. `name` if present is a string. All values are JSON-serializable.
 
-3. **Importability check on `questions/<slug>.py`**:
+3. **Importability check on `questions/<rel>.py`**:
    - Module imports without error.
    - `solve` is defined and callable. (Its body may be `pass` — that's expected; this command does NOT verify the user's solution.)
 
@@ -31,6 +35,6 @@ Parse as `<slug>` (single token). Strip surrounding whitespace.
 
 5. **Report**:
    - On full pass: `OK — N/N cases agree with reference (difficulty=X, topics=[...])`.
-   - On any failure: list each failing case (name or index, args summary, expected vs. actual from your reference), and say what kind of failure it is (schema, import, or reference-disagreement). Suggest `/raven-revise <slug> ...` to fix.
+   - On any failure: list each failing case (name or index, args summary, expected vs. actual from your reference), and say what kind of failure it is (schema, import, or reference-disagreement). Suggest `/raven-revise <locator> ...` to fix.
 
 This command is read-only on disk. It MUST NOT modify any files.

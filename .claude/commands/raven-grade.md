@@ -4,15 +4,19 @@ description: Critique the user's solve for a raven question (does NOT peek at te
 
 You are reviewing the user's solution to a problem after they've worked on it.
 
-**Hard rule: you MUST NOT read `tests/<slug>.json`.** The grade should reflect general code quality and reasoning, not "did your code happen to pass these specific cases". The harness already tells the user pass/fail via `./raven run <slug>`; your job is the qualitative review.
+**Hard rule: you MUST NOT read any file under `tests/`.** The grade should reflect general code quality and reasoning, not "did your code happen to pass these specific cases". The harness already tells the user pass/fail via `./raven run <slug>`; your job is the qualitative review.
 
 The user invoked: `/raven-grade $ARGUMENTS`
 
-Parse as `<slug>` (single token).
+Parse as a single locator token — either a bare slug or path-style (`<folder>/<...>/<slug>`).
+
+**Resolve `<locator>` to `<rel>`**:
+- Path-style: `<rel>` is the locator itself (after stripping any leading `/`).
+- Bare slug: recursively walk `questions/` for `<slug>.py`; `<rel>` is the unique match's path-without-extension relative to `questions/`. Abort if zero matches or duplicates.
 
 ## Steps
 
-1. **Read `questions/<slug>.py`** — including the docstring (so you know the problem) and the user's current `solve` implementation.
+1. **Read `questions/<rel>.py`** — including the docstring (so you know the problem) and the user's current `solve` implementation.
 
 2. **If the conversation has recent `./raven run <slug>` output**, you may reference it. Otherwise, do not run the harness yourself; this is a code review, not a test runner.
 
@@ -24,10 +28,10 @@ Parse as `<slug>` (single token).
 
 4. **Output shape**:
    - One short paragraph of overall assessment.
-   - A bulleted list of specific observations, each with a file:line reference where possible (e.g., `questions/two_sum.py:23 — the inner loop runs even after a match is found`).
+   - A bulleted list of specific observations, each with a file:line reference where possible (e.g., `questions/<rel>.py:23 — the inner loop runs even after a match is found`).
    - End with one concrete recommendation if there's an obvious next step.
 
 5. **What to never do**:
-   - Don't read `tests/<slug>.json`. Don't reference test cases by content.
+   - Don't read any file under `tests/`. Don't reference test cases by content.
    - Don't write a full corrected solution unprompted. Point at issues; let the user fix.
    - Don't grade as pass/fail — that's the harness's job.
