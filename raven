@@ -252,20 +252,50 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0 if passed == total else 1
 
 
-def collect_questions() -> list[tuple[str, dict | None]]:
-    rows: list[tuple[str, dict | None]] = []
-    if not TESTS_DIR.is_dir():
-        return rows
-    for p in sorted(TESTS_DIR.glob("*.json")):
-        slug = p.stem
-        try:
-            with p.open() as f:
-                data = json.load(f)
-        except Exception:
-            rows.append((slug, None))
+def _read_test_meta(test_path: Path) -> dict | None:
+    try:
+        with test_path.open() as f:
+            return json.load(f).get("meta")
+    except Exception:
+        return None
+
+
+def collect_questions() -> list[tuple[str, tuple[str, ...], dict | None, str | None]]:
+    """Returns (slug, folder, meta, status) rows.
+
+    status is None for healthy pairs, "orphan-question" if no test exists at
+    the mirrored path, "orphan-test" if a test has no matching question.
+    """
+    qindex = build_slug_index()
+    rows: list[tuple[str, tuple[str, ...], dict | None, str | None]] = []
+    seen_slugs: set[str] = set()
+
+    for slug, qpath in qindex.items():
+        seen_slugs.add(slug)
+        folder = qpath.relative_to(QUESTIONS_DIR).parts[:-1]
+        _, tpath, _ = paths_for(qpath)
+        if not tpath.is_file():
+            rows.append((slug, folder, None, "orphan-question"))
             continue
-        rows.append((slug, data.get("meta")))
+        rows.append((slug, folder, _read_test_meta(tpath), None))
+
+    if TESTS_DIR.is_dir():
+        for tpath in sorted(TESTS_DIR.rglob("*.json")):
+            rel = tpath.relative_to(TESTS_DIR)
+            if any(part.startswith((".", "_")) for part in rel.parts):
+                continue
+            slug = tpath.stem
+            if slug in seen_slugs:
+                continue
+            folder = rel.parts[:-1]
+            rows.append((slug, folder, _read_test_meta(tpath), "orphan-test"))
+
+    rows.sort(key=lambda r: ((not r[1]), r[1], r[0]))
     return rows
+
+
+def _format_difficulty(difficulty: str) -> str:
+    return f"[{difficulty}]".ljust(8)
 
 
 def cmd_list(args: argparse.Namespace) -> int:
@@ -277,32 +307,49 @@ def cmd_list(args: argparse.Namespace) -> int:
     want_difficulty = args.difficulty
     want_topic = args.topic
 
-    filtered: list[tuple[str, str, list[str], bool]] = []
-    for slug, meta in rows:
+    filtered: list[tuple[str, tuple[str, ...], str, list[str], str | None, bool]] = []
+    for slug, folder, meta, status in rows:
         if meta is None:
-            difficulty, topics, missing = "?", [], True
+            difficulty, topics, meta_missing = "?", [], True
         else:
             difficulty = meta.get("difficulty", "?")
             topics = meta.get("topics") or []
-            missing = "difficulty" not in meta or "topics" not in meta
+            meta_missing = "difficulty" not in meta or "topics" not in meta
         if want_difficulty and difficulty != want_difficulty:
             continue
         if want_topic and want_topic not in topics:
             continue
-        filtered.append((slug, difficulty, topics, missing))
+        filtered.append((slug, folder, difficulty, topics, status, meta_missing))
 
     if not filtered:
         print("(no questions match)")
         return 0
 
-    slug_w = max(len("slug"), max(len(s) for s, *_ in filtered))
-    diff_w = max(len("difficulty"), max(len(d) for _, d, *_ in filtered))
-    print(f"{'slug':<{slug_w}}  {'difficulty':<{diff_w}}  topics")
-    print(f"{'-' * slug_w}  {'-' * diff_w}  {'-' * 20}")
-    for slug, difficulty, topics, missing in filtered:
-        topics_str = ", ".join(topics) if topics else "-"
-        flag = "  (meta missing)" if missing else ""
-        print(f"{slug:<{slug_w}}  {difficulty:<{diff_w}}  {topics_str}{flag}")
+    groups: dict[tuple[str, ...], list[tuple[str, str, list[str], str | None, bool]]] = {}
+    for slug, folder, difficulty, topics, status, meta_missing in filtered:
+        groups.setdefault(folder, []).append((slug, difficulty, topics, status, meta_missing))
+
+    sorted_folders = sorted(groups.keys(), key=lambda f: ((not f), f))
+
+    for i, folder in enumerate(sorted_folders):
+        if i > 0:
+            print()
+        header = "(root)" if not folder else "/".join(folder) + "/"
+        print(header)
+        entries = sorted(groups[folder], key=lambda e: e[0])
+        slug_w = max(len(e[0]) for e in entries)
+        for slug, difficulty, topics, status, meta_missing in entries:
+            topics_str = ", ".join(topics) if topics else "-"
+            flags: list[str] = []
+            if status == "orphan-question":
+                flags.append("(missing test)")
+            elif status == "orphan-test":
+                flags.append("(missing question)")
+            elif meta_missing:
+                flags.append("(meta missing)")
+            flag_str = ("  " + " ".join(flags)) if flags else ""
+            diff_str = _format_difficulty(difficulty)
+            print(f"  {slug:<{slug_w}}  {diff_str}  {topics_str}{flag_str}")
     return 0
 
 
