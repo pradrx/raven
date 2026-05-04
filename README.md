@@ -23,22 +23,29 @@ Otherwise prefix with `./` when run from the repo root.
 ## Solving a question
 
 ```bash
-./raven list                      # browse what's available
+./raven list                      # browse what's available, grouped by folder
 ./raven list --difficulty easy    # filter
 ./raven list --topic hash-map
 ./raven show two_sum              # problem statement + meta, no test cases
 ```
 
-1. Open `questions/<slug>.py`. The docstring describes the problem and gives a couple of illustrative examples (deliberately not the same as the hidden test inputs).
+1. Open `questions/<rel>.py` (where `<rel>` is the slug, optionally prefixed by a folder path — see [Folders below](#folders)). The docstring describes the problem and gives a couple of illustrative examples (deliberately not the same as the hidden test inputs).
 2. Fill in the body of `def solve(...)`.
-3. Run `./raven run <slug>` to test.
+3. Run `./raven run <slug>` to test. The runner finds the file by slug regardless of which folder it lives in.
 
 ```bash
 ./raven run two_sum
+./raven run leetcode/easy/two_sum   # path-style also works
 # → per-case PASS/FAIL with case names, summary, exit 0 on all-pass.
 ```
 
 Exceptions in `solve` are reported as a failed case, not a crash, so a half-finished implementation still gives you useful output.
+
+### Folders
+
+Questions, tests, and specs can live at any depth under their respective roots — `questions/leetcode/easy/two_sum.py`, `questions/stripe/invoice_match_by_id.py`, etc. The three roots **mirror each other**: a question at `questions/<rel>.py` requires its test at `tests/<rel>.json` and (if present) spec at `specs/<rel>.md`.
+
+Slugs are globally unique across the whole `questions/` tree, so the runner always finds a question by bare slug. Path-style is accepted as a typo guard.
 
 ## Authoring questions with a coding agent
 
@@ -46,12 +53,12 @@ The agent contract lives in [`AGENTS.md`](./AGENTS.md). Five slash commands unde
 
 | Command | What it does |
 | --- | --- |
-| `/raven-spec <slug>` | Scaffold `specs/<slug>.md` from a structured template so you can describe the problem in your editor instead of cramming it into a single prompt line. |
-| `/raven-new <slug> [<description>]` | Generate a new question + tests pair. Uses `specs/<slug>.md` if it exists, else the inline `<description>`. Validates inline (the agent writes a reference solution **in context**, runs it against every case, and **never writes it to disk**). Atomic rollback of the generated pair on failure (the spec file, if any, is left untouched). |
-| `/raven-revise <slug> <change>` | Modify an existing pair (docstring, tests, or both). Re-validates; restores the originals if validation fails. |
-| `/raven-check <slug>` | Re-validate an existing pair without changing it. Useful after a hand edit. |
-| `/raven-hint <slug>` | Tiered hint (nudge → approach → partial code) escalating with each invocation. Forbidden from reading the test file. |
-| `/raven-grade <slug>` | Qualitative critique of your `solve` (style, complexity, edge cases). Also forbidden from reading the test file. |
+| `/raven-spec <rel>` | Scaffold `specs/<rel>.md` from a structured template. `<rel>` is path-style (e.g. `leetcode/easy/two_sum`) or a bare slug for root-level questions. |
+| `/raven-new <rel> [<description>]` | Generate a new question + tests pair at the mirrored path. Uses `specs/<rel>.md` if it exists, else the inline `<description>`. Validates inline (the agent writes a reference solution **in context**, runs it against every case, and **never writes it to disk**). Atomic rollback of the generated pair on failure (the spec file, if any, is left untouched). |
+| `/raven-revise <locator> <change>` | Modify an existing pair (docstring, tests, or both). `<locator>` is bare slug or path-style. Re-validates; restores the originals if validation fails. |
+| `/raven-check <locator>` | Re-validate an existing pair without changing it. Useful after a hand edit. |
+| `/raven-hint <locator>` | Tiered hint (nudge → approach → partial code) escalating with each invocation. Forbidden from reading any file under `tests/`. |
+| `/raven-grade <locator>` | Qualitative critique of your `solve` (style, complexity, edge cases). Also forbidden from reading any file under `tests/`. |
 
 Example session in Claude Code, inline form (good for short asks):
 
@@ -96,19 +103,22 @@ raven/
 ├── raven                       # the runner CLI (run | list | show)
 ├── AGENTS.md                   # canonical contract for any agent generating problems
 ├── CLAUDE.md                   # thin pointer so Claude Code auto-loads the framing
-├── questions/<slug>.py         # vanilla problem statement + boilerplate solve
-├── tests/<slug>.json           # hidden cases + meta (difficulty, topics)
-├── specs/<slug>.md             # optional: richer problem spec consumed by /raven-new
+├── questions/<rel>.py          # vanilla problem statement + boilerplate solve
+├── tests/<rel>.json            # hidden cases + meta (difficulty, topics)
+├── specs/<rel>.md              # optional: richer problem spec consumed by /raven-new
 ├── templates/                  # paste-able canonical shapes (question/tests/spec)
 └── .claude/commands/*.md       # slash command definitions
 ```
 
+`<rel>` is the relative path under each root, without extension. It's a bare slug for root-level questions (`two_sum`) or a folder/slug path for organized ones (`leetcode/easy/two_sum`, `stripe/invoice_match_by_id`). The three roots mirror each other on `<rel>`.
+
 ## Conventions worth knowing
 
-- **Slugs are forever.** Lowercase snake_case, never reused. `/raven-new` aborts on collision.
+- **Slugs are forever and globally unique.** Lowercase, `[a-z][a-z0-9_-]*`. Never reused, regardless of folder. `/raven-new` aborts on collision anywhere in the tree.
+- **Mirror rule.** Question, test, and (if present) spec all live at the same `<rel>` under their respective roots.
 - **`solve` is fixed.** Every question file defines a function called `solve` with positional arguments matching the JSON `args` order. No `kwargs`, no class wrappers (yet).
 - **Strict equality.** A case passes iff `solve(*args) == expected`. No custom validators yet — problems with multiple valid outputs are out of scope for v1.
 - **Reference solutions never live on disk.** Validation is agent-shaped: generate, run, discard. The repo stays clean and there's nothing to peek at.
-- **`/raven-hint` and `/raven-grade` cannot read `tests/`.** That's a hard rule in their command files. The hint and the grade come from the docstring and your `solve`, not from the test data.
+- **`/raven-hint` and `/raven-grade` cannot read any file under `tests/`.** That's a hard rule in their command files. The hint and the grade come from the docstring and your `solve`, not from the test data.
 
 The full agent contract — schema details, slug rules, case-coverage floor, validation rules, and don'ts — is in [`AGENTS.md`](./AGENTS.md). Read that before invoking any slash command.

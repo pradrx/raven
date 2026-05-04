@@ -10,38 +10,59 @@ Raven is a local LeetCode-style practice tool. Coding agents generate **question
 
 ```
 raven/
-├── raven                       # CLI runner (run | list | show)
-├── AGENTS.md                   # this file
-├── CLAUDE.md                   # thin pointer to this file for Claude Code
-├── questions/<slug>.py         # vanilla problem statement + boilerplate solve
-├── tests/<slug>.json           # hidden test cases + metadata
-├── specs/<slug>.md             # OPTIONAL user-authored spec consumed by /raven-new
+├── raven                          # CLI runner (run | list | show)
+├── AGENTS.md                      # this file
+├── CLAUDE.md                      # thin pointer to this file for Claude Code
+├── questions/<rel>.py             # vanilla problem statement + boilerplate solve
+├── tests/<rel>.json               # hidden test cases + metadata
+├── specs/<rel>.md                 # OPTIONAL user-authored spec consumed by /raven-new
 ├── templates/
-│   ├── question.py.tpl         # canonical shape for a question file
-│   ├── tests.json.tpl          # canonical shape for a tests file
-│   └── spec.md.tpl             # canonical shape for a spec file
-└── .claude/commands/*.md       # slash command definitions
+│   ├── question.py.template       # canonical shape for a question file
+│   ├── tests.json.template        # canonical shape for a tests file
+│   └── spec.md.template           # canonical shape for a spec file
+└── .claude/commands/*.md          # slash command definitions
 ```
 
-`specs/<slug>.md` is optional. It exists when the user invoked `/raven-spec <slug>` to scaffold a richer description before generating. Once `/raven-new` runs, the spec file becomes inert — raven leaves it alone for the user to commit, gitignore, or delete.
+`<rel>` is the relative path under each of the three roots, **without extension**. It may be a bare slug at the root (e.g. `two_sum`) or include user-chosen folders (e.g. `leetcode/easy/two_sum` or `stripe/invoice_match_by_id`). Folders are organizational only — slugs (the file stem) are globally unique across the entire `questions/` tree.
 
-The pair `(questions/<slug>.py, tests/<slug>.json)` MUST share the same `<slug>`. Both files exist or neither does.
+`specs/<rel>.md` is optional. It exists when the user invoked `/raven-spec <rel>` to scaffold a richer description before generating. Once `/raven-new` runs, the spec file becomes inert — raven leaves it alone for the user to commit, gitignore, or delete.
+
+### Mirror rule
+
+The triple `(questions/<rel>.py, tests/<rel>.json, specs/<rel>.md)` MUST share the same `<rel>`.
+
+- Question and test exist together at the mirrored path or neither does.
+- Spec is optional, but if present it must live at the same `<rel>`.
+- A question at `questions/leetcode/easy/two_sum.py` REQUIRES its test at `tests/leetcode/easy/two_sum.json` — a test under any other folder is a contract violation.
 
 ## Slug rules
 
-- Lowercase `snake_case`.
-- ASCII letters, digits, and underscores only.
+- Lowercase. ASCII letters, digits, underscores, and hyphens only — pattern `[a-z][a-z0-9_-]*`.
 - Must start with a letter.
-- Short and descriptive (`two_sum`, `edit_distance_variants`, `valid_parens`).
-- Must not collide with an existing question. `/raven-new` aborts on collision.
+- Short and descriptive (`two_sum`, `edit_distance_variants`, `valid_parens`, `contains-duplicate`).
+- **Globally unique across the entire `questions/` tree.** Folder context does not disambiguate — `leetcode/two_sum` and `interview/two_sum` cannot coexist.
+- Slugs are unique forever within the repo. Don't release a slug name back into the namespace by deleting and re-creating.
 
-## Question file shape (`questions/<slug>.py`)
+**Folder segments** (the parts of `<rel>` before the slug) follow the same character rules as slugs.
+
+## Path-style argument convention
+
+Slash commands and the runner accept locators in two equivalent forms:
+
+- **Bare slug**: `two_sum`. The runner finds the file by walking `questions/` recursively.
+- **Path-style**: `<folder>/<...>/<slug>`, e.g. `leetcode/easy/two_sum`. Last segment is the slug; preceding segments are the folder path.
+
+Create-side commands (`/raven-spec`, `/raven-new`) **require** the path-style form when you want to place files in a subfolder; a bare slug means "create at the root of the appropriate directory".
+
+Read-side commands (`raven run`, `raven show`, `/raven-revise`, `/raven-check`, `/raven-hint`, `/raven-grade`) accept either form. With path-style, the resolver verifies the slug actually lives at the requested folder and errors loudly otherwise — this is a typo guard.
+
+## Question file shape (`questions/<rel>.py`)
 
 Required:
 - A module-level docstring containing:
   - The problem name as a title (`Two Sum`).
   - The problem statement.
-  - One or two illustrative input/output examples that **must not be exact duplicates of any test case in `tests/<slug>.json`**. They are for the human to grok the shape; they are not test data.
+  - One or two illustrative input/output examples that **must not be exact duplicates of any test case in `tests/<rel>.json`**. They are for the human to grok the shape; they are not test data.
 - A single function `def solve(...)` whose body is `pass`.
 
 Allowed:
@@ -53,9 +74,9 @@ Forbidden:
 - A real implementation in `solve` — its body is always `pass`.
 - Third-party imports.
 
-See `questions/two_sum.py` for the canonical example. The minimal shape lives at `templates/question.py.tpl`.
+See `questions/two_sum.py` for the canonical example. The minimal shape lives at `templates/question.py.template`.
 
-## Test file schema (`tests/<slug>.json`)
+## Test file schema (`tests/<rel>.json`)
 
 ```json
 {
@@ -88,7 +109,7 @@ Free-form, but prefer this preferred set so `raven list --topic …` stays usefu
 
 Add a new topic only if a problem genuinely calls for one.
 
-The minimal shape lives at `templates/tests.json.tpl`.
+The minimal shape lives at `templates/tests.json.template`.
 
 ## Case coverage rules
 
@@ -104,8 +125,8 @@ Three cases is the floor, not a target. Most problems benefit from five to eight
 
 Every slash command that writes or modifies a question/tests pair MUST validate before declaring done:
 
-1. **Schema** — `tests/<slug>.json` parses as JSON and matches the schema above (required fields present, types correct, enums respected).
-2. **Importability** — `questions/<slug>.py` imports cleanly and defines a callable `solve`.
+1. **Schema** — `tests/<rel>.json` parses as JSON and matches the schema above (required fields present, types correct, enums respected).
+2. **Importability** — `questions/<rel>.py` imports cleanly and defines a callable `solve`.
 3. **Reference solution agreement** — the agent generates a reference solution in its own context (in chat, in a Python tool call, in scratch memory), runs it against every case, and confirms `actual == expected` for all of them.
 
 The reference solution is **never written to disk**. It exists only long enough to validate the cases.
@@ -118,12 +139,12 @@ All slash commands live in `.claude/commands/*.md`. Each command MUST follow the
 
 | Command | Args | Behavior |
 | --- | --- | --- |
-| `/raven-spec` | `<slug>` | Scaffold `specs/<slug>.md` from `templates/spec.md.tpl` for the user to edit. Aborts on collision with an existing question or spec. Does NOT generate a question. |
-| `/raven-new` | `<slug> [<description>]` | Generate a new question + tests pair. If `specs/<slug>.md` exists, uses it (and warns if inline `<description>` was also given); otherwise uses inline `<description>`; aborts if neither is present. Validates inline; atomic rollback of the generated pair on failure (spec file is left alone). Aborts on slug collision. |
-| `/raven-revise` | `<slug> <change description>` | Modify an existing pair (docstring, tests, or both). Re-validates. Atomic rollback to previous contents on failure. |
-| `/raven-check` | `<slug>` | Re-validate an existing pair without changing it. Useful after manual edits. |
-| `/raven-hint` | `<slug>` | Read-only. Tiered hint (nudge → approach → partial code). MUST NOT read `tests/<slug>.json`. |
-| `/raven-grade` | `<slug>` | Read-only. Critique the user's `solve` (style, complexity, edge cases). MUST NOT read `tests/<slug>.json`. |
+| `/raven-spec` | `<rel>` (path-style or bare slug) | Scaffold `specs/<rel>.md` from `templates/spec.md.template` for the user to edit. Recursively walks all three roots; aborts on slug collision anywhere. Does NOT generate a question. |
+| `/raven-new` | `<rel> [<description>]` | Generate a new question + tests pair at the mirrored paths. If `specs/<rel>.md` exists, uses it (and warns if inline `<description>` was also given); otherwise uses inline `<description>`; aborts if neither is present. Validates inline; atomic rollback (and empty-folder cleanup) of the generated pair on failure (spec file is left alone). Aborts on slug collision anywhere in the tree. |
+| `/raven-revise` | `<locator> <change description>` | Modify an existing pair (docstring, tests, or both). `<locator>` is a bare slug or path-style. Re-validates. Atomic rollback to previous contents on failure. |
+| `/raven-check` | `<locator>` | Re-validate an existing pair without changing it. Useful after manual edits. |
+| `/raven-hint` | `<locator>` | Read-only. Tiered hint (nudge → approach → partial code). MUST NOT read any file under `tests/`. |
+| `/raven-grade` | `<locator>` | Read-only. Critique the user's `solve` (style, complexity, edge cases). MUST NOT read any file under `tests/`. |
 
 ## CLI catalog
 
@@ -131,17 +152,18 @@ The `raven` script is a runner only. It does not author or validate.
 
 | Command | Behavior |
 | --- | --- |
-| `raven run <slug>` | Import `questions/<slug>.py`, call `solve(*case.args)` for each case, report PASS/FAIL + summary. Exits 0 on all-pass, 1 otherwise. |
-| `raven list [--difficulty X] [--topic Y]` | Print a table of slug / difficulty / topics. Filters AND together. Flags rows with missing meta. |
-| `raven show <slug>` | Print the question's module docstring and `meta` block. Deliberately omits `cases`. |
+| `raven run <locator>` | Import `questions/<rel>.py`, call `solve(*case.args)` for each case, report PASS/FAIL + summary. `<locator>` is a bare slug or path-style. Exits 0 on all-pass, 1 otherwise. |
+| `raven list [--difficulty X] [--topic Y]` | Print questions grouped by folder, with slug / difficulty / topics. Filters AND together. Flags rows with missing meta or mirror-rule violations (orphan question or orphan test). |
+| `raven show <locator>` | Print the question's module docstring and `meta` block. Deliberately omits `cases`. |
 
 ## Don'ts
 
 - Don't write reference solutions to disk under any name (`solutions/`, `_ref/`, etc.).
 - Don't fill `solve`'s body. The user solves; agents generate problems.
 - Don't add or modify cases without re-validating the pair end-to-end.
-- Don't leak test contents in `/raven-hint` or `/raven-grade` output. Both commands MUST NOT read `tests/<slug>.json`.
+- Don't leak test contents in `/raven-hint` or `/raven-grade` output. Both commands MUST NOT read any file under `tests/`.
 - Don't put third-party imports in question files.
 - Don't commit broken pairs. If you can't get validation to pass, delete the files and explain why to the user.
-- Don't reuse a slug. Slugs are unique forever within the repo.
-- Don't modify, archive, or delete `specs/<slug>.md`. That file belongs to the user — they wrote it, they own its lifecycle. `/raven-new`'s rollback only affects the generated `questions/` and `tests/` files.
+- Don't reuse a slug. Slugs are unique forever within the repo, regardless of folder.
+- Don't break the mirror rule. Question, test, and (if present) spec all share the same `<rel>`.
+- Don't modify, archive, or delete `specs/<rel>.md`. That file belongs to the user — they wrote it, they own its lifecycle. `/raven-new`'s rollback only affects the generated `questions/` and `tests/` files (and any folders it created under those roots).
